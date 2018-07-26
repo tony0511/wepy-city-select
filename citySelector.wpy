@@ -1,0 +1,404 @@
+<!-- 城市选择 -->
+<template>
+  <view class="container citySelect">
+    <view class="topView">
+      <view class="search">
+        <input placeholder="🔍 城市名称" @input="inputChange" placeholder-style="color: #B8C1CC;" />
+      </view>
+      <view class="viewTitle">当前定位城市</view>
+      <view class="viewContent">
+        <view wx:if="{{localStatus==='success'}}" class="left" @tap="cityChange">
+          <text data-type="city" data-code="{{localCode}}" data-name="{{localCity}}">{{localCity}}</text>
+          <text class="tip">GPS定位</text>
+        </view>
+        <view wx:if="{{localStatus==='fail'}}" class="left">
+          <text>定位失败</text>
+        </view>
+        <view wx:if="{{localStatus==='busy'}}" class="left">
+          <text>正在定位</text>
+        </view>
+        <view wx:if="{{localStatus==='noAuth'}}" class="left">
+          <text>尚未开启定位权限</text>
+        </view>
+        <view wx:if="{{localStatus==='fail'}}" class="right" @tap="getLocation">刷新</view>
+        <view wx:if="{{localStatus==='busy'}}" class="right">
+          <image src="{{picPath}}/spinner.png"></image>
+        </view>
+        <view wx:if="{{localStatus==='noAuth'}}" class="right" @tap="getLocationRight">去开启</view>
+      </view>
+    </view>
+    <view style="height: 20rpx; width: 100%;"></view>
+    <view class="listView" style="height: {{listViewHeight}}px;" @tap="cityChange">
+      <scroll-view class="scrollView" scroll-y scroll-into-view="{{toScrolllView}}">
+        <view class="hot" id="citySelect_hot">
+          <view class="hotTitle">热门城市</view>
+          <view class="hotList">
+            <view wx:for="{{hotCityData}}" wx:key="id" class="hotItem" data-type="city" data-code="{{item.id}}" data-name="{{item.name}}">{{item.name}}</view>
+          </view>
+        </view>
+        <!-- 尽量减少DOM节点，不然会影响体验性能 -->
+        <block wx:for="{{cityData}}" wx:for-item="oneItem" wx:for-index="oneIndex" wx:key="key">
+          <view class="listTitle" id="citySelect_{{oneItem.key}}">{{oneItem.key}}</view>
+          <view class="listBody">
+            <view class="line"></view>
+              <block wx:for="{{oneItem.citys}}" wx:for-item="twoItem" wx:for-index="twoIndex" wx:key="id">
+                <view class="content" id="citySelect_{{twoItem.id}}" data-type="city" data-code="{{twoItem.id}}" data-name="{{twoItem.name}}">{{twoItem.name}}
+                </view>
+                <view class="line itemLine"></view>
+              </block>
+            <view class="line"></view>
+          </view>
+        </block>
+      </scroll-view>
+      <view class="selectBar" @touchend.stop="letterSelect">
+        <view class="barItem" data-type="letter" data-letter="hot">热门</view>
+        <view wx:for="{{cityData}}" wx:key="key" class="barItem" data-type="letter" data-letter="{{item.key}}">{{item.key}}</view>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script>
+  import wepy from 'wepy';
+
+  export default class citySelect extends wepy.page {
+    config = { // 页面配置
+      navigationBarTitleText: '选择城市',
+    };
+
+    data = {
+      picPath: wepy.pic_path, // 图片根路径
+      listViewHeight: 0, // 显示区域的高度
+      cityData: [], // 城市列表
+      hotCityData: [], // 热门城市列表
+      cityCode: '', // 选中的城市code
+      localCode: '', // 定位的城市code
+      localCity: '', // 定位的城市name
+      localStatus: 'busy', // 定位状态 busy: 正在定位, success: 定位成功, fail: 定位失败, noAuth: 没有权限
+      toScrolllView: '', // 滚动定位到的位置id值
+      searchTimeId: null, // 搜索时间延迟id
+    };
+
+    methods = {
+      inputChange(e) { // 输入查询城市
+        const value = e.detail.value;
+        // console.log(value);
+        if (value && !/[^\u4e00-\u9fa5]/.test(value)) {
+          const step = () => {
+            const lnI = this.cityData.length;
+            stopId:for (let i = 0; i < lnI; i++) { // eslint-disable-line
+              const citys = this.cityData[i].citys;
+              const lnJ = citys.length;
+              for (let j = 0; j < lnJ; j++) {
+                if (citys[j].name.indexOf(value) > -1) {
+                  this.toScrolllView = `citySelect_${citys[j].id}`;
+                  this.$apply();
+                  break stopId; // eslint-disable-line
+                }
+              }
+            }
+          };
+          clearTimeout(this.searchTimeId);
+          this.searchTimeId = setTimeout(() => { step(); }, 500);
+        }
+      },
+      cityChange(e) { // 更改城市
+        console.log('dataset==', e.target.dataset);
+        const dataset = e.target.dataset;
+        if (dataset.type === 'city') {
+          this.$parent.globalData.selectCity = { id: dataset.code, name: dataset.name };
+          wepy.navigateBack();
+        }
+      },
+      getLocationRight() { // 未授权，发起授权请求
+        console.log('未授权，待授权==');
+        wepy.authorize({ scope: 'scope.userLocation' }).then((response) => {
+          this.getLocation();
+          console.log(response);
+          console.log('未授权 ===> 待授权');
+        }).catch((error) => {
+          console.log('promise错误===', error);
+        });
+      },
+      letterSelect(e) { // 字母选择城市
+        const dataset = e.target.dataset;
+        console.log('letterSelect==', dataset);
+        if (dataset.type === 'letter') {
+          this.toScrolllView = `citySelect_${dataset.letter}`;
+          this.$apply();
+          const viewLetter = dataset.letter === 'hot' ? '热门' : dataset.letter;
+          wepy.showToast({ title: viewLetter, icon: 'none', duration: 1000 });
+        }
+      },
+    };
+
+    getLocation() { // 定位城市
+      const self = this;
+      self.localStatus = 'busy';
+      self.$apply();
+      wepy.mapsdk.reverseGeocoder({
+        success(res) {
+          console.log('reverseGeocoder===', res);
+          const info = res.result.ad_info;
+          self.cityCode = info.adcode;
+          self.localCode = info.adcode;
+          self.localCity = info.city;
+          self.localStatus = 'success';
+          self.$apply();
+        },
+        fail(res) {
+          console.log('fail==', res);
+          self.localStatus = 'fail';
+          wepy.showToast({ title: '定位失败', icon: 'none', duration: wepy.toastDuration });
+          self.$apply();
+        },
+      });
+    }
+
+    onLoad(options) {
+      const system = wepy.getSystemInfoSync();
+      console.log('getSystemInfoSync==', system);
+      // 获取节点信息
+      wepy.createSelectorQuery().select('.topView').fields({ size: true }, (res) => {
+        console.log('res===', res);
+        // 对需要滚动的区域获取需要的高度
+        this.listViewHeight = system.windowHeight - res.height - ((system.windowWidth / 375) * 10);
+        this.$apply();
+        setTimeout(() => { // 定位城市
+          // 查看是否授权
+          wepy.getSetting().then((res) => {
+            console.log('getSetting===', res);
+            // 已有授权后获取用户信息
+            if (res.authSetting['scope.userLocation']) {
+              // 已经授权，可以直接调用 getLocation 获取头像昵称
+              this.getLocation();
+              console.log('已经授权，可以直接调用定位');
+            } else {
+              // 未授权，发起授权请求
+              this.localStatus = 'noAuth';
+              this.$apply();
+              console.log('未授权，待授权==');
+              this.methods.getLocationRight();
+            }
+          }).catch((error) => {
+            console.log('promise错误===', error);
+            wepy.showToast({ title: '判断定位是否授权失败！', icon: 'none', duration: this.globalData.duration });
+          });
+          // 如果之前已有数据则不用进行再次调用接口
+          const cityData = this.$parent.globalData.cityData;
+          const hotCityData = this.$parent.globalData.hotCityData;
+          if (cityData.length && hotCityData.length) {
+            console.log('yes==');
+            this.cityData = cityData;
+            this.hotCityData = hotCityData;
+          } else {
+            this.getCityList();
+          }
+        }, 0);
+      }).exec();
+    }
+    getCityList() { // 获取城市列表
+      const self = this;
+      wepy.mapsdk.getCityList({
+        success (res) {
+          // console.log('city===', res);
+          const proList = res.result[0];
+          const preCityList = res.result[1];
+          // 过滤不需要的城市地区
+          const noUsePro = new Set(['北京', '天津', '上海', '重庆', '香港', '澳门']);
+          let usePro = [];
+          let noUseCityIndex = [];
+          let noUseCityIndexSet = new Set([]);
+          proList.forEach((item) => {
+            if (noUsePro.has(item.name)) {
+              usePro.push(item);
+              noUseCityIndex.push(item.cidx);
+            }
+          });
+          noUseCityIndex.forEach(item => {
+            for (let i = item[0]; i <= item[1]; i++) {
+              noUseCityIndexSet.add(i);
+            }
+          });
+          const cityData = [...(preCityList.filter((item, index) => !noUseCityIndexSet.has(index))), ...usePro];
+          // 热门城市筛选：北京、上海、深圳、广州、杭州、成都、武汉
+          const hotCityNameSet = new Set(['北京', '上海', '深圳', '广州', '杭州', '成都', '武汉']);
+          self.hotCityData = cityData.filter(item => hotCityNameSet.has(item.name));
+          self.$parent.globalData.hotCityData = self.hotCityData;
+          const firstLetterSet = new Set([]);
+          const cityFormat = [];
+          // 格式化成需要的数据格式
+          cityData.forEach(item => {
+            const letter = item.pinyin[0][0].toUpperCase();
+            // console.log(letter);
+            if (firstLetterSet.has(letter)) {
+              cityFormat.find(item => item.key === letter).citys.push(item);
+            } else {
+              firstLetterSet.add(letter);
+              cityFormat.push({ key: letter, citys: [item] });
+            }
+          });
+          // 格式化后的城市数据删除不需要的属性，不然会严重影响性能体验
+          cityFormat.forEach(item => {
+            item.citys.forEach(item => {
+              delete item.cidx;
+              delete item.location;
+              delete item.pinyin;
+              delete item.fullname;
+            });
+          });
+          // 格式化后的城市数据排序
+          cityFormat.sort((a, b) => (a.key.charCodeAt(0) - b.key.charCodeAt(0)));
+          self.cityData = cityFormat;
+          self.$parent.globalData.cityData = cityFormat;
+          self.$apply();
+          // console.log('getCityList==', res);
+          console.log('cityFormat===', cityFormat);
+          // console.log('hotCityData===', self.hotCityData);
+        },
+        fail (res) {
+          // console.log('getCityList_fail==', res);
+          wepy.showToast({ title: '获取城市列表失败', icon: 'none', duration: wepy.toastDuration });
+        },
+      });
+    }
+  }
+</script>
+
+<style lang="less">
+@keyframes rotate
+{
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.container{
+  &.citySelect{
+    >.topView{
+      >.search{
+        width: 100%;
+        height: 71rpx;
+        padding-top: 17rpx;
+        background-color: #BBC2CA;
+        >input{
+          width: 718rpx;
+          height: 56rpx;
+          background-color: #fff;
+          border-radius: 28rpx;
+          margin: 0 auto;
+          text-align: center;
+          font-size: 26rpx;
+        }
+      }
+      >.viewTitle{
+        padding: 38rpx 34rpx 22rpx;
+        line-height: 28rpx;
+        font-size: 28rpx;
+        color: #8C939D;
+      }
+      >.viewContent{
+        height: 88rpx;
+        padding: 0 30rpx 0 34rpx;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: #fff;
+        >.left{
+          color: #1D2637;
+          font-size: 30rpx;
+          >.tip{
+            color: #8C939D;
+            font-size: 26rpx;
+            margin-left: 26rpx;
+          }
+        }
+        >.right{
+          color: #FEAA0A;
+          font-size: 30rpx;
+          >image{
+            width: 40rpx;
+            height: 40rpx;
+            animation: rotate 1.5s linear infinite;
+          }
+        }
+      }
+    }
+    >.listView{
+      overflow-y: auto;
+      position: relative;
+      >.scrollView{
+        height: 100%;
+        overflow: scroll;
+        .hot{
+          >.hotTitle{
+            line-height: 28rpx;
+            padding: 18rpx 30rpx 2rpx;
+            color: #8C939D;
+            font-size: 28rpx;
+          }
+          >.hotList{
+            padding-left: 12rpx;
+            display: flex;
+            flex-flow: wrap;
+            >.hotItem{
+              line-height: 68rpx;
+              width: 210rpx;
+              text-align: center;
+              font-size: 30rpx;
+              background-color: #fff;
+              margin: 20rpx 0 0 20rpx;
+            }
+          }
+        }
+        .listTitle{
+          line-height: 20rpx;
+          font-size: 28rpx;
+          padding: 44rpx 32rpx 22rpx;
+          color: #8C939D;
+        }
+        .listBody{
+          background-color: #fff;
+          position: relative;
+          .line{
+            height: 2rpx;
+            background: #ccc;
+            transform: scaleY(0.5);
+            &.itemLine{
+              margin-left: 32rpx;
+            }
+            &:last-child{
+              width: 100%;
+              position: absolute;
+              left: 0;
+              bottom: 0;
+            }
+          }
+          > .content{
+            line-height: 90rpx;
+            padding-left: 32rpx;
+            font-size: 30rpx;
+            margin-right: 150rpx;
+          }
+        }
+      }
+      >.selectBar{
+        width: 42rpx;
+        height: 95%;
+        position: absolute;
+        right: 4rpx;
+        top: 1%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        >.barItem{
+          color: #FEAA0A;
+          font-size: 22rpx;
+          white-space: nowrap;
+          width: 100%;
+          text-align: center;
+        }
+      }
+    }
+  }
+}
+</style>
